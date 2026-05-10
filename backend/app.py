@@ -11,124 +11,164 @@ from dotenv import load_dotenv
 import numpy as np
 import pandas as pd
 
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LinearRegression
-
 import google.generativeai as genai
+
 load_dotenv()
 
-
+# =========================================================
 # FLASK APP SETUP
+# =========================================================
 
 app = Flask(__name__)
 
+# FULL CORS FIX
 CORS(
     app,
-    resources={
-        r"/api/*": {
-            "origins": [
-                "https://student-performance-ai-karan-kumars-projects-b7999ebc.vercel.app"
-            ]
-        }
-    }
+    resources={r"/*": {"origins": "*"}},
+    supports_credentials=True
 )
+
+# MANUAL HEADERS FIX
+@app.after_request
+def after_request(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
+    return response
+
+# =========================================================
 # GEMINI AI CONFIGURATION
+# =========================================================
 
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if GEMINI_API_KEY and GEMINI_API_KEY.strip():
+
     try:
-        print(f"DEBUG: GOOGLE_API_KEY found (length: {len(GEMINI_API_KEY)})")
+        print("DEBUG: GOOGLE_API_KEY found")
 
         genai.configure(api_key=GEMINI_API_KEY)
 
-        # Safer model for deployment
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
-        print("DEBUG: Gemini AI initialized successfully")
+        print("DEBUG: Gemini initialized successfully")
 
     except Exception as e:
-        print(f"ERROR initializing Gemini AI: {e}")
-        model = None
-else:
-    model = None
-    print("WARNING: GOOGLE_API_KEY not found. AI features will use fallback mode.")
 
+        print(f"Gemini Initialization Error: {e}")
+
+        model = None
+
+else:
+
+    print("WARNING: GOOGLE_API_KEY missing")
+
+    model = None
+
+# =========================================================
 # HELPER FUNCTIONS
+# =========================================================
 
 def _to_number(value, fallback=0.0):
+
     try:
         return float(value)
+
     except (TypeError, ValueError):
         return float(fallback)
 
 
 def _normalize_marks(raw_marks):
+
     if not isinstance(raw_marks, dict):
         return {}
 
     normalized = {}
 
     for subject, score in raw_marks.items():
+
         numeric_score = _to_number(score, fallback=-1)
 
         if 0 <= numeric_score <= 100:
+
             normalized[str(subject)] = round(numeric_score, 2)
 
     return normalized
 
-# LOAD ML MODEL
+# =========================================================
+# LOAD MODEL
+# =========================================================
 
 try:
+
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    model_path = os.path.join(BASE_DIR, 'student_model.pkl')
+    model_path = os.path.join(BASE_DIR, "student_model.pkl")
 
-    student_model = pickle.load(open(model_path, "rb"))
+    with open(model_path, "rb") as f:
+        student_model = pickle.load(f)
 
-    print("DEBUG: Successfully loaded student_model.pkl")
+    print("DEBUG: student_model.pkl loaded successfully")
 
 except Exception as e:
-    print(f"WARNING: Error loading student_model.pkl: {e}")
+
+    print(f"WARNING: Could not load student_model.pkl: {e}")
 
     student_model = None
 
+# =========================================================
 # HOME ROUTE
+# =========================================================
 
-@app.route('/')
+@app.route("/")
 def home():
+
     return jsonify({
         "status": "online",
-        "message": "EduTrack Backend is running successfully!"
+        "message": "EduTrack Backend Running Successfully"
     })
 
-# STUDENT ANALYSIS API
+# =========================================================
+# HEALTH CHECK
+# =========================================================
 
-@app.route('/api/students/analyze', methods=['POST'])
+@app.route("/api/health", methods=["GET"])
+def health():
+
+    return jsonify({
+        "status": "ok",
+        "service": "student-performance-backend"
+    })
+
+# =========================================================
+# ANALYZE STUDENT
+# =========================================================
+
+@app.route("/api/students/analyze", methods=["POST"])
 def analyze_student():
 
     data = request.get_json(silent=True) or {}
 
-    marks = _normalize_marks(data.get('marks', {}))
+    marks = _normalize_marks(data.get("marks", {}))
 
-    study_hours = _to_number(data.get('study_hours', 5))
-    attendance = _to_number(data.get('attendance', 0))
-    assignment_score = _to_number(data.get('assignment_score', 0))
+    study_hours = _to_number(data.get("study_hours", 5))
+    attendance = _to_number(data.get("attendance", 0))
+    assignment_score = _to_number(data.get("assignment_score", 0))
 
     if not marks:
+
         return jsonify({
             "error": "At least one valid subject mark is required."
         }), 400
 
     avg_marks = sum(marks.values()) / len(marks)
 
-
-    # PREDICTION LOGIC
     pred_class = 1
 
     if student_model:
 
         try:
+
             ml_pred = float(
                 student_model.predict([
                     [study_hours, attendance, avg_marks, assignment_score]
@@ -148,20 +188,25 @@ def analyze_student():
 
             if result >= 60:
                 pred_class = 2
+
             elif result >= 40:
                 pred_class = 1
+
             else:
                 pred_class = 0
 
         except Exception as e:
+
             print(f"Prediction Error: {e}")
 
     else:
-        # Fallback prediction
+
         if avg_marks < 50:
             pred_class = 0
+
         elif avg_marks < 75:
             pred_class = 1
+
         else:
             pred_class = 2
 
@@ -172,9 +217,6 @@ def analyze_student():
         if pred_class == 1
         else "Strong"
     )
-
-
-    # WEAK SUBJECTS
 
     weak_subjects = []
 
@@ -196,19 +238,18 @@ def analyze_student():
                 "reason": reason
             })
 
-    # AI IMPROVEMENT PLAN
-
     improvement_plan = []
 
     if model and weak_subjects:
 
         try:
+
             subjects_str = ", ".join([
-                w['subject'] for w in weak_subjects
+                w["subject"] for w in weak_subjects
             ])
 
             prompt = f"""
-            A student is weak in these subjects:
+            Student is weak in:
             {subjects_str}
 
             Generate practical improvement tips.
@@ -234,19 +275,18 @@ def analyze_student():
                 improvement_plan = json.loads(json_match.group())
 
         except Exception as e:
-            print(f"Gemini Error: {e}")
 
-    # FALLBACK IMPROVEMENT PLAN
+            print(f"Gemini Error: {e}")
 
     if not improvement_plan:
 
         for sub in weak_subjects:
 
             improvement_plan.append({
-                "subject": sub['subject'],
+                "subject": sub["subject"],
                 "plan": (
-                    f"Practice {sub['subject']} daily and revise "
-                    "fundamental concepts."
+                    f"Practice {sub['subject']} daily "
+                    "and revise fundamentals."
                 )
             })
 
@@ -257,35 +297,38 @@ def analyze_student():
         "improvement_plan": improvement_plan
     })
 
-# STUDY SCHEDULE API
+# =========================================================
+# STUDY SCHEDULE
+# =========================================================
 
-@app.route('/api/schedule', methods=['POST'])
+@app.route("/api/schedule", methods=["POST"])
 def generate_schedule():
 
     data = request.get_json(silent=True) or {}
 
-    hours = _to_number(data.get('available_hours', 2))
+    hours = _to_number(data.get("available_hours", 2))
 
     weak_subjects = [
         str(subject).strip()
-        for subject in data.get('weak_subjects', [])
+        for subject in data.get("weak_subjects", [])
         if str(subject).strip()
     ]
 
     if hours < 1:
+
         return jsonify({
             "error": "Minimum 1 hour required"
         }), 400
 
-    # GEMINI AI SCHEDULE
-
     if model:
 
         try:
-            prompt = f"""
-            Create a study timetable.
 
-            Hours available: {hours}
+            prompt = f"""
+            Create study timetable.
+
+            Available hours:
+            {hours}
 
             Weak subjects:
             {', '.join(weak_subjects)}
@@ -305,10 +348,8 @@ def generate_schedule():
                 return jsonify(json.loads(json_match.group()))
 
         except Exception as e:
-            print(f"Gemini Schedule Error: {e}")
 
-  
-    # FALLBACK SCHEDULE
+            print(f"Gemini Schedule Error: {e}")
 
     schedule = []
 
@@ -342,25 +383,31 @@ def generate_schedule():
         "weekly_plan": "Practice daily and revise weekly."
     })
 
+# =========================================================
+# NOTES GENERATOR
+# =========================================================
 
-# NOTES GENERATOR API
-
-@app.route('/api/generate_notes', methods=['POST'])
+@app.route("/api/generate_notes", methods=["POST"])
 def generate_notes():
 
     data = request.get_json(silent=True) or {}
 
-    topic = str(data.get('topic', 'General Topic')).strip()
-    subject = str(data.get('subject', 'General Subject')).strip()
+    topic = str(data.get("topic", "General Topic")).strip()
+
+    subject = str(data.get("subject", "General Subject")).strip()
 
     if model:
 
         try:
+
             prompt = f"""
             Generate short revision notes.
 
-            Subject: {subject}
-            Topic: {topic}
+            Subject:
+            {subject}
+
+            Topic:
+            {topic}
 
             Use bullet points only.
             """
@@ -369,7 +416,7 @@ def generate_notes():
 
             notes = [
                 line.strip()
-                for line in response.text.split('\n')
+                for line in response.text.split("\n")
                 if line.strip()
             ]
 
@@ -380,9 +427,9 @@ def generate_notes():
             })
 
         except Exception as e:
+
             print(f"Gemini Notes Error: {e}")
 
-    # Fallback notes
     notes = [
         f"{topic} is important in {subject}.",
         "Revise core concepts regularly.",
@@ -396,17 +443,19 @@ def generate_notes():
         "notes": notes
     })
 
+# =========================================================
+# CHATBOT
+# =========================================================
 
-# CHATBOT API
-
-@app.route('/api/chatbot', methods=['POST'])
+@app.route("/api/chatbot", methods=["POST"])
 def chatbot():
 
     data = request.get_json(silent=True) or {}
 
-    message = str(data.get('message', '')).strip()
+    message = str(data.get("message", "")).strip()
 
     if not message:
+
         return jsonify({
             "reply": "Please enter your question."
         })
@@ -414,6 +463,7 @@ def chatbot():
     if model:
 
         try:
+
             prompt = (
                 "You are EduTrack AI assistant. "
                 f"Answer clearly: {message}"
@@ -426,34 +476,38 @@ def chatbot():
             })
 
         except Exception as e:
+
             print(f"Gemini Chatbot Error: {e}")
 
-    # Fallback chatbot
     return jsonify({
-        "reply": (
-            "AI service is currently unavailable. "
-            "Please try again later."
-        )
+        "reply": "AI service unavailable. Please try again later."
     })
 
-# PERFORMANCE PREDICTION API
+# =========================================================
+# PREDICT SCORE
+# =========================================================
 
-@app.route('/api/predict', methods=['POST'])
+@app.route("/api/predict", methods=["POST"])
 def predict_score():
 
     data = request.get_json(silent=True) or {}
 
-    study_hours = _to_number(data.get('study_hours', 5))
-    avg_marks = _to_number(data.get('avg_marks', 0))
-    attendance = _to_number(data.get('attendance', 0))
-    assignments = _to_number(data.get('assignment_score', 0))
+    study_hours = _to_number(data.get("study_hours", 5))
+
+    avg_marks = _to_number(data.get("avg_marks", 0))
+
+    attendance = _to_number(data.get("attendance", 0))
+
+    assignments = _to_number(data.get("assignment_score", 0))
 
     predicted_score = 0
+
     risk_of_failure = False
 
     if student_model:
 
         try:
+
             ml_pred = float(
                 student_model.predict([
                     [study_hours, attendance, avg_marks, assignments]
@@ -476,9 +530,11 @@ def predict_score():
             risk_of_failure = predicted_score < 40
 
         except Exception as e:
+
             print(f"Prediction Error: {e}")
 
     else:
+
         predicted_score = (
             0.5 * avg_marks
             + 0.2 * attendance
@@ -511,23 +567,15 @@ def predict_score():
         "recommendations": recommendations
     })
 
+# =========================================================
+# RUN APP
+# =========================================================
 
-# HEALTH CHECK API
-
-@app.route('/api/health', methods=['GET'])
-def health():
-    return jsonify({
-        "status": "ok",
-        "service": "student-performance-backend"
-    })
-
-# RUN FLASK APP
-
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
 
     app.run(
-        host='0.0.0.0',
+        host="0.0.0.0",
         port=port
     )
