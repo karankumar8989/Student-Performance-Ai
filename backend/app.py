@@ -22,20 +22,14 @@ load_dotenv()
 app = Flask(__name__)
 
 # FULL CORS FIX
-CORS(
-    app,
-    resources={r"/*": {"origins": "*"}},
-    supports_credentials=True
-)
-
-# MANUAL HEADERS FIX
-@app.after_request
-def after_request(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
-    return response
-
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "https://student-performance-ai-karan-kumars-projects-b7999ebc.vercel.app",
+            "http://localhost:5173"
+        ]
+    }
+})
 # =========================================================
 # GEMINI AI CONFIGURATION
 # =========================================================
