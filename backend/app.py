@@ -22,14 +22,16 @@ load_dotenv()
 
 app = Flask(__name__)
 
-CORS(app, resources={
-    r"/*": {
-        "origins": [
-            "https://student-performance-ai-uxvj.vercel.app",
-            "http://localhost:5173"
-        ]
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": [
+                "https://student-performance-ai-karan-kumars-projects-b7999ebc.vercel.app"
+            ]
+        }
     }
-})
+)
 # GEMINI AI CONFIGURATION
 
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
